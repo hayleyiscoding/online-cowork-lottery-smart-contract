@@ -41,7 +41,6 @@ module.exports = {
             //   url: MAINNET_RPC_URL
             // }
             chainId: 31337,
-            blockConfirmations: 1,
         },
         localhost: {
             chainId: 31337,
@@ -99,7 +98,7 @@ module.exports = {
         currency: "USD",
         outputFile: "gas-report.txt",
         noColors: true,
-        // coinmarketcap: process.env.COINMARKETCAP_API_KEY,
+        coinmarketcap: process.env.COINMARKETCAP_API_KEY,
     },
     contractSizer: {
         runOnCompile: false,

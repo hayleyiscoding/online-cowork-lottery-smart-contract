@@ -1,6 +1,6 @@
-// Lottery Pool
+// Lottery
 
-// Enter the lottery pool (paying some amount)
+// Enter the lottery (paying some amount)
 // Pick a random winner (verifiably random)
 // Winner to be selected every X seconds -> completely automated
 // Chainlink Oracle -> Randomness, Automated execution (Chainlink UpKeeper)
@@ -14,19 +14,16 @@ import "@chainlink/contracts/src/v0.8/AutomationCompatible.sol";
 import "@chainlink/contracts/src/v0.8/ConfirmedOwner.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 
-error LotteryPool__NotEnoughETHEntered();
-error LotteryPool__TransferFailed();
-error LotteryPool__NotOpen();
-error LotteryPool__UpkeepNotNeeded(
-    uint256 currentBalance,
-    uint256 numPlayers,
-    uint256 lotteryPoolState
-);
+error Lottery__NotEnoughFeeEntered();
+error Lottery__TransferFailed();
+error Lottery__NotOpen();
+error Lottery__NotAttend(address recentWinner);
+error Lottery__UpkeepNotNeeded(uint256 currentBalance, uint256 numPlayers, uint256 lotteryState);
 
-contract LotteryPool is VRFConsumerBaseV2, AutomationCompatibleInterface, ConfirmedOwner {
+contract Lottery is VRFConsumerBaseV2, AutomationCompatibleInterface, ConfirmedOwner {
     using SafeMath for uint256;
     /* Type Declarations */
-    enum LotteryPoolState {
+    enum LotteryState {
         OPEN,
         CALCULATING
     } // uint256 0 = OPEN , 1 = CALCULATING
@@ -35,22 +32,22 @@ contract LotteryPool is VRFConsumerBaseV2, AutomationCompatibleInterface, Confir
     VRFCoordinatorV2Interface private immutable i_vrfCoordinator;
     bytes32 private immutable i_gasLane;
     uint64 private immutable i_subscriptionId;
+    uint16 private constant REQUEST_CONFIRMATIONS = 3;
     uint32 private immutable i_callbackGasLimit;
-    uint8 private constant REQUEST_CONFIRMATIONS = 3;
-    uint8 private constant NUM_WORDS = 1;
+    uint32 private s_numberOfWinners = 1;
 
-    /* Lottery Pool State variables */
+    /* Lottery State variables */
     uint256 private s_interval;
     uint256 private s_lastTimeStamp;
-    LotteryPoolState private s_lotteryPoolState;
+    LotteryState private s_lotteryState;
     address payable[] private s_players;
     uint256 private constant s_entranceFee = 1e18;
-    address private s_recentWinner;
-    uint8 private immutable i_withdrawPercentageForWinner;
-    uint8 private immutable i_withdrawPercentageForOwner;
+    address[] private s_recentWinners;
+    uint8 private immutable i_withdrawPercentageForWinner; // Must be less than 100
+    uint8 private immutable i_withdrawPercentageForOwner; // Must be less than 100
 
     /* Events */
-    event PlayerEnteredToLotteryPool(address indexed player);
+    event PlayerEnteredToLottery(address indexed player);
     event RequestedLotteryWinner(uint256 indexed requestId);
     event WinnerPicked(address indexed winner);
     event WithdrawnFund(address indexed someone, uint256 amount);
@@ -68,29 +65,39 @@ contract LotteryPool is VRFConsumerBaseV2, AutomationCompatibleInterface, Confir
         i_gasLane = _gasLane;
         i_subscriptionId = _subscriptionId;
         i_callbackGasLimit = _callbackGasLimit;
-        s_lotteryPoolState = LotteryPoolState.OPEN;
+        s_lotteryState = LotteryState.OPEN;
         s_lastTimeStamp = block.timestamp;
         s_interval = _interval;
         i_withdrawPercentageForWinner = _withdrawPercentageForWinner;
         i_withdrawPercentageForOwner = _withdrawPercentageForOwner;
     }
 
-    function enterLotteryPool() external payable {
-        if (msg.value < s_entranceFee) {
-            revert LotteryPool__NotEnoughETHEntered();
+    function isRecentWinner(address _sender) public view returns (bool) {
+        for (uint32 i = 0; i < s_recentWinners.length; i++) {
+            if (_sender == s_recentWinners[i]) return true;
         }
-        if (s_lotteryPoolState != LotteryPoolState.OPEN) {
-            revert LotteryPool__NotOpen();
+        return false;
+    }
+
+    function enterLottery() external payable {
+        if (isRecentWinner(msg.sender) == true) {
+            revert Lottery__NotAttend(msg.sender);
+        }
+        if (msg.value < s_entranceFee) {
+            revert Lottery__NotEnoughFeeEntered();
+        }
+        if (s_lotteryState != LotteryState.OPEN) {
+            revert Lottery__NotOpen();
         }
 
         // Allocate amount of tickets to senders
-        uint depositAmount = uint(msg.value);
-        uint lotteryTicketAmount = depositAmount.div(s_entranceFee);
+        uint256 depositAmount = uint256(msg.value);
+        uint256 lotteryTicketAmount = depositAmount.div(s_entranceFee);
         for (uint i = 0; i < lotteryTicketAmount; i++) {
             s_players.push(payable(msg.sender));
         }
 
-        emit PlayerEnteredToLotteryPool(msg.sender);
+        emit PlayerEnteredToLottery(msg.sender);
     }
 
     /**
@@ -103,7 +110,7 @@ contract LotteryPool is VRFConsumerBaseV2, AutomationCompatibleInterface, Confir
     function checkUpkeep(
         bytes memory /* checkData */
     ) public override returns (bool upKeepNeeded, bytes memory /* performData */) {
-        bool isOpen = (LotteryPoolState.OPEN == s_lotteryPoolState);
+        bool isOpen = (LotteryState.OPEN == s_lotteryState);
         bool timePassed = (block.timestamp - s_lastTimeStamp) > s_interval;
         bool hasPlayers = s_players.length > 0;
         bool hasBalance = address(this).balance > 0;
@@ -113,21 +120,22 @@ contract LotteryPool is VRFConsumerBaseV2, AutomationCompatibleInterface, Confir
     function performUpkeep(bytes calldata /* performData */) external override {
         (bool upkeepNeeded, ) = checkUpkeep("");
         if (!upkeepNeeded) {
-            revert LotteryPool__UpkeepNotNeeded(
+            revert Lottery__UpkeepNotNeeded(
                 address(this).balance,
                 s_players.length,
-                uint256(s_lotteryPoolState)
+                uint256(s_lotteryState)
             );
         }
 
         // Request random number
-        s_lotteryPoolState = LotteryPoolState.CALCULATING;
+        s_lotteryState = LotteryState.CALCULATING;
+        s_recentWinners = new address[](0);
         uint256 requestId = i_vrfCoordinator.requestRandomWords(
             i_gasLane, //gasLane
             i_subscriptionId,
             REQUEST_CONFIRMATIONS,
             i_callbackGasLimit,
-            NUM_WORDS
+            s_numberOfWinners
         );
         emit RequestedLotteryWinner(requestId);
     }
@@ -136,35 +144,43 @@ contract LotteryPool is VRFConsumerBaseV2, AutomationCompatibleInterface, Confir
         uint256 /* requestId */,
         uint256[] memory randomWords
     ) internal override {
-        uint256 indexOfWinner = randomWords[0] % s_players.length;
-        address payable recentWinner = s_players[indexOfWinner];
-        s_recentWinner = recentWinner;
-        s_lotteryPoolState = LotteryPoolState.OPEN;
+        for (uint32 i = 0; i < s_numberOfWinners; i++) {
+            uint256 indexOfWinner = randomWords[i] % s_players.length;
+            address recentWinner = s_players[indexOfWinner];
+            s_recentWinners.push(recentWinner);
+            emit WinnerPicked(recentWinner);
+            withdrawFund(
+                payable(recentWinner),
+                address(this).balance.mul(i_withdrawPercentageForWinner).div(100)
+            ); // ?% => Winner
+            withdrawFund(
+                payable(owner()),
+                address(this).balance.mul(i_withdrawPercentageForOwner).div(100)
+            ); // ?% => Owner
+        }
+        s_lotteryState = LotteryState.OPEN;
         s_players = new address payable[](0);
         s_lastTimeStamp = block.timestamp;
-        emit WinnerPicked(recentWinner);
-        withdrawFund(
-            recentWinner,
-            address(this).balance.mul(i_withdrawPercentageForWinner).div(100)
-        ); // ?% => Winner
-        withdrawFund(
-            payable(owner()),
-            address(this).balance.mul(i_withdrawPercentageForOwner).div(100)
-        ); // ?% => Owner
     }
 
     // Withdraw Fund For Specific Account from Contract
-    function withdrawFund(address payable _to, uint _amount) private {
+    function withdrawFund(address payable _to, uint256 _amount) private {
         (bool success, ) = _to.call{value: _amount}("");
         if (!success) {
-            revert LotteryPool__TransferFailed();
+            revert Lottery__TransferFailed();
         }
         emit WithdrawnFund(_to, _amount);
     }
 
     // Update Interval by Owner
-    function updateInterval(uint _interval) external onlyOwner {
+    function updateInterval(uint256 _interval) external onlyOwner {
         s_interval = _interval;
+    }
+
+    // Update Interval by Owner
+    function updateNumberOfWinners(uint32 _numberOfWinners) external onlyOwner {
+        if (s_lotteryState == LotteryState.CALCULATING) revert Lottery__NotOpen();
+        s_numberOfWinners = _numberOfWinners;
     }
 
     /* View / Pure functions */
@@ -180,20 +196,24 @@ contract LotteryPool is VRFConsumerBaseV2, AutomationCompatibleInterface, Confir
         return s_interval;
     }
 
+    function getPlayers() external view returns (address payable[] memory) {
+        return s_players;
+    }
+
     function getPlayer(uint256 index) external view returns (address) {
         return s_players[index];
     }
 
-    function getRecentWinner() external view returns (address) {
-        return s_recentWinner;
+    function getRecentWinners() external view returns (address[] memory) {
+        return s_recentWinners;
     }
 
-    function getLotteryPoolState() external view returns (LotteryPoolState) {
-        return s_lotteryPoolState;
+    function getLotteryState() external view returns (LotteryState) {
+        return s_lotteryState;
     }
 
-    function getNumWords() external pure returns (uint256) {
-        return NUM_WORDS;
+    function getNumberOfWinners() external view returns (uint32) {
+        return s_numberOfWinners;
     }
 
     function getNumberOfPlayers() external view returns (uint256) {

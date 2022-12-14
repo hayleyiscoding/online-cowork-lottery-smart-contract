@@ -3,6 +3,8 @@
   "version": "1.0.0",
   "description": "",
   "scripts": {
+    "compile": "hardhat compile",
+    "clean": "hardhat clean",
     "test": "yarn hardhat test",
     "test-staging": "yarn hardhat test --network goerli",
     "lint": "yarn solhint 'contracts/*.sol'",

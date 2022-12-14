@@ -31,10 +31,9 @@ const networkConfig = {
         subscriptionId: "2805",
         gasLane: "0x4b09e658ed251bcafeebbc69400383d49f344ace09b9576fe248bb02c003fe9f", // 500 gwei
         keepersUpdateInterval: "30",
-        lotteryEntranceFee: ethers.utils.parseEther("0.00073"), // Approx. 1 MATIC
+        lotteryEntranceFee: ethers.utils.parseEther("0.0007"), // Approx. 1 MATIC
         callbackGasLimit: "500000", // 500,000 gas
-        vrfCoordinatorV2:
-            "https://mumbai.polygonscan.com/address/0x7a1BaC17Ccc5b313516C5E16fb24f7659aA5ebed",
+        vrfCoordinatorV2: "0x7a1BaC17Ccc5b313516C5E16fb24f7659aA5ebed",
     },
     137: {
         name: "polygon",

@@ -35,11 +35,12 @@ module.exports = async ({ getNamedAccounts, deployments }) => {
     log("----------------------------------------------------")
     const arguments = [
         vrfCoordinatorV2Address,
-        subscriptionId,
         networkConfig[chainId]["gasLane"],
-        networkConfig[chainId]["keepersUpdateInterval"],
-        networkConfig[chainId]["lotteryEntranceFee"],
+        subscriptionId,
         networkConfig[chainId]["callbackGasLimit"],
+        networkConfig[chainId]["keepersUpdateInterval"],
+        networkConfig[chainId]["withdrawPercentageForWinner"],
+        networkConfig[chainId]["withdrawPercentageForOwner"],
     ]
     const lottery = await deploy("Lottery", {
         from: deployer,
@@ -55,7 +56,7 @@ module.exports = async ({ getNamedAccounts, deployments }) => {
     }
 
     // Verify the deployment
-    if (!developmentChains.includes(network.name) && process.env.ETHERSCAN_API_KEY) {
+    if (!developmentChains.includes(network.name) && process.env.POLYGONSCAN_API_KEY) {
         log("Verifying...")
         await verify(lottery.address, arguments)
     }

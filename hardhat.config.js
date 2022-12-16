@@ -100,4 +100,9 @@ module.exports = {
     mocha: {
         timeout: 500000, // 500 seconds max for running tests
     },
+    etherscan: {
+        apiKey: {
+            polygonMumbai: process.env.POLYGONSCAN_API_KEY,
+        },
+    },
 }

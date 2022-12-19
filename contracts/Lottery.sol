@@ -18,7 +18,7 @@ error Lottery__NotEnoughFeeEntered();
 error Lottery__TransferFailed();
 error Lottery__NotOpen();
 error Lottery__NotAttend(address recentWinner);
-error Lottery__UpkeepNotNeeded(uint256 currentBalance, uint256 numPlayers, uint256 lotteryState);
+error Lottery__UpkeepNotNeeded(uint256 currentBalance, uint32 numPlayers, uint8 lotteryState);
 
 contract Lottery is VRFConsumerBaseV2, AutomationCompatibleInterface, ConfirmedOwner {
     using SafeMath for uint256;
@@ -40,8 +40,8 @@ contract Lottery is VRFConsumerBaseV2, AutomationCompatibleInterface, ConfirmedO
     uint256 private s_interval;
     uint256 private s_lastTimeStamp;
     LotteryState private s_lotteryState;
-    address payable[] private s_players;
     uint256 private constant s_entranceFee = 1e18;
+    address payable[] private s_players;
     address[] private s_recentWinners;
     uint8 private immutable i_withdrawPercentageForWinner; // Must be less than 100
     uint8 private immutable i_withdrawPercentageForOwner; // Must be less than 100
@@ -73,7 +73,7 @@ contract Lottery is VRFConsumerBaseV2, AutomationCompatibleInterface, ConfirmedO
     }
 
     function isRecentWinner(address _sender) public view returns (bool) {
-        for (uint32 i = 0; i < s_recentWinners.length; i++) {
+        for (uint32 i = 0; i < uint32(s_recentWinners.length); i++) {
             if (_sender == s_recentWinners[i]) return true;
         }
         return false;
@@ -92,8 +92,8 @@ contract Lottery is VRFConsumerBaseV2, AutomationCompatibleInterface, ConfirmedO
 
         // Allocate amount of tickets to senders
         uint256 depositAmount = uint256(msg.value);
-        uint256 lotteryTicketAmount = depositAmount.div(s_entranceFee);
-        for (uint i = 0; i < lotteryTicketAmount; i++) {
+        uint32 lotteryTicketAmount = uint32(depositAmount.div(s_entranceFee));
+        for (uint32 i = 0; i < lotteryTicketAmount; i++) {
             s_players.push(payable(msg.sender));
         }
 
@@ -122,8 +122,8 @@ contract Lottery is VRFConsumerBaseV2, AutomationCompatibleInterface, ConfirmedO
         if (!upkeepNeeded) {
             revert Lottery__UpkeepNotNeeded(
                 address(this).balance,
-                s_players.length,
-                uint256(s_lotteryState)
+                uint32(s_players.length),
+                uint8(s_lotteryState)
             );
         }
 
@@ -145,7 +145,7 @@ contract Lottery is VRFConsumerBaseV2, AutomationCompatibleInterface, ConfirmedO
         uint256[] memory randomWords
     ) internal override {
         for (uint32 i = 0; i < s_numberOfWinners; i++) {
-            uint256 indexOfWinner = randomWords[i] % s_players.length;
+            uint32 indexOfWinner = uint32(randomWords[i] % s_players.length);
             address recentWinner = s_players[indexOfWinner];
             s_recentWinners.push(recentWinner);
             emit WinnerPicked(recentWinner);
@@ -200,7 +200,7 @@ contract Lottery is VRFConsumerBaseV2, AutomationCompatibleInterface, ConfirmedO
         return s_players;
     }
 
-    function getPlayer(uint256 index) external view returns (address) {
+    function getPlayer(uint32 index) external view returns (address) {
         return s_players[index];
     }
 
@@ -216,23 +216,19 @@ contract Lottery is VRFConsumerBaseV2, AutomationCompatibleInterface, ConfirmedO
         return s_numberOfWinners;
     }
 
-    function getNumberOfPlayers() external view returns (uint256) {
-        return s_players.length;
+    function getNumberOfPlayers() external view returns (uint32) {
+        return uint32(s_players.length);
     }
 
     function getLatestTimeStamp() external view returns (uint256) {
         return s_lastTimeStamp;
     }
 
-    function getRequestConfirmations() external pure returns (uint256) {
-        return REQUEST_CONFIRMATIONS;
-    }
-
-    function getWithdrawPercentageForWinner() external view returns (uint256) {
+    function getWithdrawPercentageForWinner() external view returns (uint8) {
         return i_withdrawPercentageForWinner;
     }
 
-    function getWithdrawPercentageForOwner() external view returns (uint256) {
+    function getWithdrawPercentageForOwner() external view returns (uint8) {
         return i_withdrawPercentageForOwner;
     }
 }

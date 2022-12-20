@@ -32,9 +32,8 @@ const networkConfig = {
         gasLane: "0x4b09e658ed251bcafeebbc69400383d49f344ace09b9576fe248bb02c003fe9f", // 500 gwei
         subscriptionId: 2805,
         callbackGasLimit: "500000", // 500,000 gas
-        keepersUpdateInterval: 60,
-        withdrawPercentageForWinner: 70,
-        withdrawPercentageForOwner: 30,
+        keepersUpdateInterval: 600,
+        winningPercentageForWinner: 70,
     },
     137: {
         name: "polygon",

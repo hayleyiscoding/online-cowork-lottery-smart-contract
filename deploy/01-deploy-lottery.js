@@ -39,8 +39,7 @@ module.exports = async ({ getNamedAccounts, deployments }) => {
         subscriptionId,
         networkConfig[chainId]["callbackGasLimit"],
         networkConfig[chainId]["keepersUpdateInterval"],
-        networkConfig[chainId]["withdrawPercentageForWinner"],
-        networkConfig[chainId]["withdrawPercentageForOwner"],
+        networkConfig[chainId]["winningPercentageForWinner"],
     ]
     const lottery = await deploy("Lottery", {
         from: deployer,

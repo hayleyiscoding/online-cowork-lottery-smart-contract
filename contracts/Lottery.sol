@@ -18,7 +18,6 @@ import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 error Lottery_NotLessThan100();
 error Lottery__NotEnoughFeeEntered();
 error Lottery__NotOpen();
-error Lottery__NotAttend(address recentWinner);
 error Lottery__UpkeepNotNeeded(uint256 currentBalance, uint32 numPlayers, uint8 lotteryState);
 error Lottery__TransferFailed();
 
@@ -36,7 +35,7 @@ contract Lottery is VRFConsumerBaseV2, AutomationCompatibleInterface, ConfirmedO
     uint64 private immutable i_subscriptionId;
     uint16 private constant REQUEST_CONFIRMATIONS = 3;
     uint32 private immutable i_callbackGasLimit;
-    uint32 private s_numberOfWinners = 1;
+    uint32 private s_numberOfWinners;
 
     /* Lottery State variables */
     uint256 private s_interval;
@@ -60,6 +59,7 @@ contract Lottery is VRFConsumerBaseV2, AutomationCompatibleInterface, ConfirmedO
         bytes32 _gasLane,
         uint64 _subscriptionId,
         uint32 _callbackGasLimit,
+        uint32 _numberOfWinners,
         uint256 _interval,
         uint8 _winningPercentageForWinner
     ) VRFConsumerBaseV2(_vrfCoordinatorV2) ConfirmedOwner(msg.sender) {
@@ -70,25 +70,14 @@ contract Lottery is VRFConsumerBaseV2, AutomationCompatibleInterface, ConfirmedO
         i_gasLane = _gasLane;
         i_subscriptionId = _subscriptionId;
         i_callbackGasLimit = _callbackGasLimit;
+        s_numberOfWinners = _numberOfWinners;
         s_lotteryState = LotteryState.OPEN;
         s_lastTimeStamp = block.timestamp;
         s_interval = _interval;
         i_winningPercentageForWinner = _winningPercentageForWinner;
     }
 
-    function isRecentWinner(address _sender) public view returns (bool) {
-        for (uint32 i = 0; i < uint32(s_recentWinners.length); i++) {
-            if (_sender == s_recentWinners[i]) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     function enterLottery() external payable {
-        if (isRecentWinner(msg.sender)) {
-            revert Lottery__NotAttend(msg.sender);
-        }
         if (msg.value < s_entranceFee) {
             revert Lottery__NotEnoughFeeEntered();
         }

@@ -32,17 +32,19 @@ const networkConfig = {
         gasLane: "0x4b09e658ed251bcafeebbc69400383d49f344ace09b9576fe248bb02c003fe9f", // 500 gwei
         subscriptionId: 2805,
         callbackGasLimit: "500000", // 500,000 gas
-        keepersUpdateInterval: 600,
+        numberOfWinners: 2,
+        keepersUpdateInterval: 60 * 60 * 24 * 7,
         winningPercentageForWinner: 70,
     },
     137: {
         name: "polygon",
-        subscriptionId: "6926",
-        gasLane: "0x6e099d640cde6de9d40ac749b4b594126b0169747122711109c9985d47751f93", // 200 gwei
-        keepersUpdateInterval: "30",
-        lotteryEntranceFee: ethers.utils.parseEther("0.00073"), // Approx. 1 MATIC
-        callbackGasLimit: "500000", // 500,000 gas
         vrfCoordinatorV2: "0xAE975071Be8F8eE67addBC1A82488F1C24858067",
+        gasLane: "0x6e099d640cde6de9d40ac749b4b594126b0169747122711109c9985d47751f93", // 200 gwei
+        subscriptionId: 6926,
+        callbackGasLimit: "500000", // 500,000 gas
+        numberOfWinners: 2,
+        keepersUpdateInterval: 60 * 60 * 24 * 7,
+        winningPercentageForWinner: 70,
     },
 }
 

@@ -38,6 +38,7 @@ module.exports = async ({ getNamedAccounts, deployments }) => {
         networkConfig[chainId]["gasLane"],
         subscriptionId,
         networkConfig[chainId]["callbackGasLimit"],
+        networkConfig[chainId]["numberOfWinners"],
         networkConfig[chainId]["keepersUpdateInterval"],
         networkConfig[chainId]["winningPercentageForWinner"],
     ]

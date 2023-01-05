@@ -9,32 +9,33 @@ require("dotenv").config()
 /**
  * @type import('hardhat/config').HardhatUserConfig
  */
+const PRIVATE_KEY = process.env.PRIVATE_KEY || "your private key"
+const MNEMONIC = process.env.MNEMONIC || "your mnemonic"
 
-// const MAINNET_RPC_URL =
-//     process.env.MAINNET_RPC_URL ||
-//     process.env.ALCHEMY_MAINNET_RPC_URL ||
-//     "https://eth-mainnet.alchemyapi.io/v2/your-api-key"
+const MAINNET_RPC_URL =
+    process.env.MAINNET_RPC_URL || "https://eth-mainnet.alchemyapi.io/v2/your-api-key"
 const GOERLI_RPC_URL =
-    process.env.GOERLI_RPC_URL ||
-    "https://eth-mainnet.g.alchemy.com/v2/Rk4FtpW9cSeQHshNGhoLcj9_4hcfAdYn"
+    process.env.GOERLI_RPC_URL || "https://eth-goerli.g.alchemy.com/v2/your-api-key"
 const POLYGON_MAINNET_RPC_URL =
     process.env.POLYGON_MAINNET_RPC_URL || "https://polygon-mainnet.alchemyapi.io/v2/your-api-key"
 const POLYGON_MUMBAI_RPC_URL =
-    process.env.POLYGON_MUMBAI_RPC_URL ||
-    "https://polygon-mumbai.g.alchemy.com/v2/xQhsXeKNL_lLBrIta2_FiJNtV51WkfPb"
-const PRIVATE_KEY = process.env.PRIVATE_KEY
-// optional
-const MNEMONIC = process.env.MNEMONIC || "your mnemonic"
-const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY
-const COINMARKETCAP_API_KEY = process.env.COINMARKETCAP_API_KEY
-const POLYGONSCAN_API_KEY = process.env.POLYGONSCAN_API_KEY
+    process.env.POLYGON_MUMBAI_RPC_URL || "https://polygon-mumbai.g.alchemy.com/v2/your-api-key"
+
 const REPORT_GAS = process.env.REPORT_GAS
 
-// Your API key for Etherscan, obtain one at https://etherscan.io/
+const accounts =
+    typeof PRIVATE_KEY !== "undefined"
+        ? [PRIVATE_KEY]
+        : typeof MNEMONIC !== "undefined"
+        ? { mnemonic: MNEMONIC }
+        : []
 
 module.exports = {
-    defaultNetwork: "hardhat",
+    defaultNetwork: "mumbai",
     networks: {
+        localhost: {
+            url: "http://127.0.0.1:8545",
+        },
         hardhat: {
             // // If you want to do some forking, uncomment this
             // forking: {
@@ -42,56 +43,39 @@ module.exports = {
             // }
             chainId: 31337,
         },
-        localhost: {
-            chainId: 31337,
-        },
         goerli: {
             url: GOERLI_RPC_URL,
-            accounts: PRIVATE_KEY !== undefined ? [PRIVATE_KEY] : [],
-            //   accounts: {
-            //     mnemonic: MNEMONIC,
-            //   },
+            accounts,
             saveDeployments: true,
             chainId: 5,
         },
-        // mainnet: {
-        //     url: MAINNET_RPC_URL,
-        //     accounts: PRIVATE_KEY !== undefined ? [PRIVATE_KEY] : [],
-        //     //   accounts: {
-        //     //     mnemonic: MNEMONIC,
-        //     //   },
-        //     saveDeployments: true,
-        //     chainId: 1,
-        // },
+        mainnet: {
+            url: MAINNET_RPC_URL,
+            accounts,
+            saveDeployments: true,
+            chainId: 1,
+        },
         polygon: {
             url: POLYGON_MAINNET_RPC_URL,
-            accounts: PRIVATE_KEY !== undefined ? [PRIVATE_KEY] : [],
+            accounts,
             saveDeployments: true,
             chainId: 137,
         },
         mumbai: {
             url: POLYGON_MUMBAI_RPC_URL,
-            accounts: PRIVATE_KEY !== undefined ? [PRIVATE_KEY] : [],
+            accounts,
             saveDeployments: true,
             chainId: 80001,
         },
     },
-    etherscan: {
-        // yarn hardhat verify --network <NETWORK> <CONTRACT_ADDRESS> <CONSTRUCTOR_PARAMETERS>
-        apiKey: {
-            goerli: ETHERSCAN_API_KEY,
-            polygon: POLYGONSCAN_API_KEY,
-        },
-        customChains: [
-            {
-                network: "goerli",
-                chainId: 5,
-                urls: {
-                    apiURL: "https://api-goerli.etherscan.io/api",
-                    browserURL: "https://goerli.etherscan.io",
-                },
+    solidity: {
+        version: "0.8.7",
+        settings: {
+            optimizer: {
+                enabled: true,
+                runs: 1000,
             },
-        ],
+        },
     },
     gasReporter: {
         enabled: REPORT_GAS,
@@ -113,17 +97,12 @@ module.exports = {
             default: 1,
         },
     },
-    solidity: {
-        compilers: [
-            {
-                version: "0.8.7",
-            },
-            {
-                version: "0.4.24",
-            },
-        ],
-    },
     mocha: {
         timeout: 500000, // 500 seconds max for running tests
+    },
+    etherscan: {
+        apiKey: {
+            polygonMumbai: process.env.POLYGONSCAN_API_KEY,
+        },
     },
 }

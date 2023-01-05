@@ -3,12 +3,15 @@
   "version": "1.0.0",
   "description": "",
   "scripts": {
-    "test": "yarn hardhat test",
-    "test-staging": "yarn hardhat test --network goerli",
-    "lint": "yarn solhint 'contracts/*.sol'",
-    "lint:fix": "yarn solhint 'contracts/**/*.sol' --fix",
-    "format": "yarn prettier --write .",
-    "coverage": "yarn hardhat coverage"
+    "compile": "hardhat compile",
+    "clean": "hardhat clean",
+    "deploy": "hardhat deploy --network mumbai",
+    "test": "hardhat test",
+    "test-staging": "hardhat test --network goerli",
+    "lint": "solhint 'contracts/*.sol'",
+    "lint:fix": "solhint 'contracts/**/*.sol' --fix",
+    "format": "prettier --write .",
+    "coverage": "hardhat coverage"
   },
   "license": "MIT",
   "devDependencies": {

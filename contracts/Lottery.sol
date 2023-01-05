@@ -1,303 +1,238 @@
+// Lottery
+
+// Enter the lottery (paying some amount)
+// Pick a random winner (verifiably random)
+// Winner to be selected every X seconds -> completely automated
+// Chainlink Oracle -> Randomness, Automated execution (Chainlink UpKeeper)
+
 // SPDX-License-Identifier: MIT
-
 pragma solidity ^0.8.7;
+pragma abicoder v2;
 
-import "@chainlink/contracts/src/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
 import "@chainlink/contracts/src/v0.8/VRFConsumerBaseV2.sol";
-import "@chainlink/contracts/src/v0.8/interfaces/AutomationCompatibleInterface.sol";
-import "hardhat/console.sol";
+import "@chainlink/contracts/src/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
+import "@chainlink/contracts/src/v0.8/AutomationCompatible.sol";
+import "@chainlink/contracts/src/v0.8/ConfirmedOwner.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 
-/* Errors */
-error Lottery__UpkeepNotNeeded(uint256 currentBalance, uint256 numPlayers, uint256 lotteryState);
+error Lottery_NotLessThan100();
+error Lottery__NotEnoughFeeEntered();
+error Lottery__NotOpen();
+error Lottery__UpkeepNotNeeded(uint256 currentBalance, uint32 numPlayers, uint8 lotteryState);
 error Lottery__TransferFailed();
-error Lottery__SendMoreToEnterLottery();
-error Lottery__LotteryNotOpen();
 
-/**@title A sample Lottery Contract
- * @author Patrick Collins
- * @notice This contract is for creating a sample Lottery contract
- * @dev This implements the Chainlink VRF Version 2
- */
-contract Lottery is VRFConsumerBaseV2, AutomationCompatibleInterface {
-    /* Type declarations */
+contract Lottery is VRFConsumerBaseV2, AutomationCompatibleInterface, ConfirmedOwner {
+    using SafeMath for uint256;
+    /* Type Declarations */
     enum LotteryState {
         OPEN,
         CALCULATING
-    }
-    /* State variables */
-    // Chainlink VRF Variables
-    VRFCoordinatorV2Interface private immutable i_vrfCoordinator;
-    uint64 private immutable i_subscriptionId;
-    bytes32 private immutable i_gasLane;
-    uint32 private immutable i_callbackGasLimit;
-    uint16 private constant REQUEST_CONFIRMATIONS = 3;
-    uint32 private constant NUM_WORDS = 1;
+    } // uint256 0 = OPEN , 1 = CALCULATING
 
-    // Lottery Variables
-    uint256 private immutable i_interval;
-    uint256 private immutable i_entranceFee;
+    /* Chainlink State variables */
+    VRFCoordinatorV2Interface private immutable i_vrfCoordinator;
+    bytes32 private immutable i_gasLane;
+    uint64 private immutable i_subscriptionId;
+    uint16 private constant REQUEST_CONFIRMATIONS = 3;
+    uint32 private immutable i_callbackGasLimit;
+    uint32 private s_numberOfWinners;
+
+    /* Lottery State variables */
+    uint256 private s_interval;
     uint256 private s_lastTimeStamp;
-    address private s_recentWinner;
-    address payable[] private s_players;
     LotteryState private s_lotteryState;
+    uint256 private constant s_entranceFee = 1e18;
+    address payable[] private s_players;
+    address[] private s_recentWinners;
+    uint256[] private s_recentWinningAmounts;
+    uint8 private immutable i_winningPercentageForWinner; // Must be less than 100
 
     /* Events */
+    event PlayerEnteredToLottery(address indexed player);
     event RequestedLotteryWinner(uint256 indexed requestId);
-    event LotteryEnter(address indexed player);
-    event WinnerPicked(address indexed player);
+    event WinnerPicked(address indexed winner);
+    event TransferWinningToWinner(address indexed winner, uint256 amount);
+    event TransferWinningToOwner(address indexed owner, uint256 amount);
 
-    /* Functions */
     constructor(
-        address vrfCoordinatorV2,
-        uint64 subscriptionId,
-        bytes32 gasLane, // keyHash
-        uint256 interval,
-        uint256 entranceFee,
-        uint32 callbackGasLimit
-    ) VRFConsumerBaseV2(vrfCoordinatorV2) {
-        i_vrfCoordinator = VRFCoordinatorV2Interface(vrfCoordinatorV2);
-        i_gasLane = gasLane;
-        i_interval = interval;
-        i_subscriptionId = subscriptionId;
-        i_entranceFee = entranceFee;
+        address _vrfCoordinatorV2,
+        bytes32 _gasLane,
+        uint64 _subscriptionId,
+        uint32 _callbackGasLimit,
+        uint32 _numberOfWinners,
+        uint256 _interval,
+        uint8 _winningPercentageForWinner
+    ) VRFConsumerBaseV2(_vrfCoordinatorV2) ConfirmedOwner(msg.sender) {
+        if (_winningPercentageForWinner > 100) {
+            revert Lottery_NotLessThan100();
+        }
+        i_vrfCoordinator = VRFCoordinatorV2Interface(_vrfCoordinatorV2);
+        i_gasLane = _gasLane;
+        i_subscriptionId = _subscriptionId;
+        i_callbackGasLimit = _callbackGasLimit;
+        s_numberOfWinners = _numberOfWinners;
         s_lotteryState = LotteryState.OPEN;
         s_lastTimeStamp = block.timestamp;
-        i_callbackGasLimit = callbackGasLimit;
+        s_interval = _interval;
+        i_winningPercentageForWinner = _winningPercentageForWinner;
     }
 
-    function enterLottery() public payable {
-        // require(msg.value >= i_entranceFee, "Not enough value sent");
-        // require(s_lotteryState == LotteryState.OPEN, "Lottery is not open");
-        if (msg.value < i_entranceFee) {
-            revert Lottery__SendMoreToEnterLottery();
+    function enterLottery() external payable {
+        if (msg.value < s_entranceFee) {
+            revert Lottery__NotEnoughFeeEntered();
         }
         if (s_lotteryState != LotteryState.OPEN) {
-            revert Lottery__LotteryNotOpen();
+            revert Lottery__NotOpen();
         }
-        s_players.push(payable(msg.sender));
-        // Emit an event when we update a dynamic array or mapping
-        // Named events with the function name reversed
-        emit LotteryEnter(msg.sender);
+
+        // Allocate amount of tickets to senders
+        uint256 depositAmount = uint256(msg.value);
+        uint32 lotteryTicketAmount = uint32(depositAmount.div(s_entranceFee));
+        for (uint32 i = 0; i < lotteryTicketAmount; i++) {
+            s_players.push(payable(msg.sender));
+        }
+
+        emit PlayerEnteredToLottery(msg.sender);
     }
 
     /**
-     * @dev This is the function that the Chainlink Keeper nodes call
-     * they look for `upkeepNeeded` to return True.
-     * the following should be true for this to return true:
-     * 1. The time interval has passed between Lottery runs.
-     * 2. The lottery is open.
-     * 3. The contract has ETH.
-     * 4. Implicity, your subscription is funded with LINK.
+     * @dev The following should be true in order to return true:
+     * 1. Our time interval should have passed
+     * 2. The lottery should have atleast 1 player, and have some ETH
+     * 3. Our subscription is funded with LINK
+     * 4. Lottery should be in "open" state
      */
     function checkUpkeep(
         bytes memory /* checkData */
-    )
-        public
-        view
-        override
-        returns (
-            bool upkeepNeeded,
-            bytes memory /* performData */
-        )
-    {
-        bool isOpen = LotteryState.OPEN == s_lotteryState;
-        bool timePassed = ((block.timestamp - s_lastTimeStamp) > i_interval);
+    ) public override returns (bool upKeepNeeded, bytes memory /* performData */) {
+        bool isOpen = (LotteryState.OPEN == s_lotteryState);
+        bool timePassed = (block.timestamp - s_lastTimeStamp) > s_interval;
         bool hasPlayers = s_players.length > 0;
         bool hasBalance = address(this).balance > 0;
-        upkeepNeeded = (timePassed && isOpen && hasBalance && hasPlayers);
-        return (upkeepNeeded, "0x0"); // can we comment this out?
+        upKeepNeeded = (isOpen && timePassed && hasPlayers && hasBalance);
     }
 
-    /**
-     * @dev Once `checkUpkeep` is returning `true`, this function is called
-     * and it kicks off a Chainlink VRF call to get a random winner.
-     */
-    function performUpkeep(
-        bytes calldata /* performData */
-    ) external override {
+    function performUpkeep(bytes calldata /* performData */) external override {
         (bool upkeepNeeded, ) = checkUpkeep("");
-        // require(upkeepNeeded, "Upkeep not needed");
         if (!upkeepNeeded) {
             revert Lottery__UpkeepNotNeeded(
                 address(this).balance,
-                s_players.length,
-                uint256(s_lotteryState)
+                uint32(s_players.length),
+                uint8(s_lotteryState)
             );
         }
+
+        // Request random number
         s_lotteryState = LotteryState.CALCULATING;
+        s_recentWinners = new address[](0);
+        s_recentWinningAmounts = new uint256[](0);
         uint256 requestId = i_vrfCoordinator.requestRandomWords(
-            i_gasLane,
+            i_gasLane, //gasLane
             i_subscriptionId,
             REQUEST_CONFIRMATIONS,
             i_callbackGasLimit,
-            NUM_WORDS
+            s_numberOfWinners
         );
-        // Quiz... is this redundant?
         emit RequestedLotteryWinner(requestId);
     }
 
-    /**
-     * @dev This is the function that Chainlink VRF node
-     * calls to send the money to the random winner.
-     */
     function fulfillRandomWords(
-        uint256, /* requestId */
+        uint256 /* requestId */,
         uint256[] memory randomWords
     ) internal override {
-        // s_players size 10
-        // randomNumber 202
-        // 202 % 10 ? what's doesn't divide evenly into 202?
-        // 20 * 10 = 200
-        // 2
-        // 202 % 10 = 2
-        uint256 indexOfWinner = randomWords[0] % s_players.length;
-        address payable recentWinner = s_players[indexOfWinner];
-        s_recentWinner = recentWinner;
-        s_players = new address payable[](0);
+        uint256 winningAmountOfWinner = uint256(address(this).balance)
+            .mul(i_winningPercentageForWinner)
+            .div(100)
+            .div(s_numberOfWinners);
+        uint256 winningAmountOfOwner = uint256(address(this).balance).sub(
+            winningAmountOfWinner.mul(s_numberOfWinners)
+        );
+        for (uint32 i = 0; i < s_numberOfWinners; i++) {
+            uint32 indexOfWinner = uint32(randomWords[i] % s_players.length);
+            address recentWinner = s_players[indexOfWinner];
+            s_recentWinners.push(recentWinner);
+            s_recentWinningAmounts.push(winningAmountOfWinner);
+            emit WinnerPicked(recentWinner);
+            transferWinning(payable(recentWinner), winningAmountOfWinner); // ?% => Winner
+        }
+        transferWinning(payable(owner()), winningAmountOfOwner); // ?% => Owner
         s_lotteryState = LotteryState.OPEN;
+        s_players = new address payable[](0);
         s_lastTimeStamp = block.timestamp;
-        (bool success, ) = recentWinner.call{value: address(this).balance}("");
-        // require(success, "Transfer failed");
+    }
+
+    // Transfer Winning For Specific Account from Contract
+    function transferWinning(address payable _to, uint256 _amount) private {
+        (bool success, ) = _to.call{value: _amount}("");
         if (!success) {
             revert Lottery__TransferFailed();
         }
-        emit WinnerPicked(recentWinner);
+        if (owner() == _to) {
+            emit TransferWinningToOwner(_to, _amount);
+        } else {
+            emit TransferWinningToWinner(_to, _amount);
+        }
     }
 
-    /** Getter Functions */
-
-    function getLotteryState() public view returns (LotteryState) {
-        return s_lotteryState;
+    // Set a new interval by Owner
+    function setInterval(uint256 _interval) external onlyOwner {
+        s_interval = _interval;
     }
 
-    function getNumWords() public pure returns (uint256) {
-        return NUM_WORDS;
+    // Set a new number of winners by Owner
+    function setNumberOfWinners(uint32 _numberOfWinners) external onlyOwner {
+        if (s_lotteryState == LotteryState.CALCULATING) {
+            revert Lottery__NotOpen();
+        }
+        s_numberOfWinners = _numberOfWinners;
     }
 
-    function getRequestConfirmations() public pure returns (uint256) {
-        return REQUEST_CONFIRMATIONS;
+    /* View / Pure functions */
+    function getBalance() external view returns (uint256) {
+        return address(this).balance;
     }
 
-    function getRecentWinner() public view returns (address) {
-        return s_recentWinner;
+    function getEntranceFee() external pure returns (uint256) {
+        return s_entranceFee;
     }
 
-    function getPlayer(uint256 index) public view returns (address) {
+    function getInterval() external view returns (uint256) {
+        return s_interval;
+    }
+
+    function getPlayers() external view returns (address payable[] memory) {
+        return s_players;
+    }
+
+    function getPlayer(uint32 index) external view returns (address) {
         return s_players[index];
     }
 
-    function getLastTimeStamp() public view returns (uint256) {
+    function getRecentWinners() external view returns (address[] memory) {
+        return s_recentWinners;
+    }
+
+    function getRecentWinningAmounts() external view returns (uint256[] memory) {
+        return s_recentWinningAmounts;
+    }
+
+    function getLotteryState() external view returns (LotteryState) {
+        return s_lotteryState;
+    }
+
+    function getNumberOfWinners() external view returns (uint32) {
+        return s_numberOfWinners;
+    }
+
+    function getNumberOfPlayers() external view returns (uint32) {
+        return uint32(s_players.length);
+    }
+
+    function getLatestTimeStamp() external view returns (uint256) {
         return s_lastTimeStamp;
     }
 
-    function getInterval() public view returns (uint256) {
-        return i_interval;
-    }
-
-    function getEntranceFee() public view returns (uint256) {
-        return i_entranceFee;
-    }
-
-    function getNumberOfPlayers() public view returns (uint256) {
-        return s_players.length;
+    function getWinningPercentageForWinner() external view returns (uint8) {
+        return i_winningPercentageForWinner;
     }
 }
-
-// import "hardhat/console.sol";
-
-// // Extra functions needed: 1) each person gets 1 free task per week, 2) Lottery entrants array needs to reset at the beginning of each week
-
-// contract Lottery {
-
-//     event NewTaskCreated(
-//         bytes32 taskID,
-//         address creatorAddress,
-//         uint256 taskTimestamp,
-//         string task,
-//         uint256 taskCost,
-//         uint256 minsToComplete,
-//         string taskDataCID,
-//         bool isDisabled
-//     );
-
-//     event DisableEvent(bytes32 taskID, bool isDisabled); // To hide a task
-
-//     struct CreateTask {
-//         bytes32 taskID;
-//         address creatorAddress;
-//         uint256 taskTimestamp;
-//         string task;
-//         uint256 taskCost;
-//         uint256 minsToComplete;
-//         string taskDataCID;
-//         address[] lotteryEntrants;
-//         bool isDisabled;
-//     }
-
-//     uint256 lotteryTotalAmount;
-//     uint256 countdown;
-//     uint256 timeofDraw;
-//     uint256 paidOut;
-//     uint256 numberOfTasks;
-//     uint256 numberOfParticipants;
-//     uint256
-
-//     mapping(bytes32 => CreateTask) public idToTask;
-
-//       function createNewTask(
-//         uint256 taskTimestamp,
-//         uint256 taskCost,
-//         uint256 minsToComplete,
-//         string calldata task,
-//         string calldata taskDataCID,
-//     ) external payable{
-
-//         require(msg.value == myTask.taskCost, "Not enough");
-
-//         // generate a taskID
-//         bytes32 taskId = keccak256(
-//             abi.encodePacked(
-//                 msg.sender,
-//                 address(this),
-//                 taskTimestamp,
-//                 taskCost,
-//                 minsToComplete
-//             )
-//         );
-
-//         address[] memory lotteryEntrants;
-
-//         idToTask[taskId] = CreateTask(
-//             taskId,
-//             taskDataCID,
-//             msg.sender,
-//             taskTimestamp,
-//             task,
-//             taskCost,
-//             minsToComplete,
-//             lotteryEntrants
-//             false,
-//         );
-
-//           myTask.lotteryEntrants.push(payable(msg.sender));
-
-//            emit NewTaskCreated(
-//            taskId,
-//             taskDataCID,
-//             msg.sender,
-//             taskTimestamp,
-//             task,
-//             taskCost,
-//             minsToComplete,
-//             false,
-//         );
-//     }
-
-//     function disableTask(bytes32 taskId) external {
-//         CreateTask memory myTask = idToTask[taskId];
-//         require(msg.sender == myTask.taskOwner, "NOT AUTHORIZED");
-//         myTask.isDisabled = true;
-//         emit DisableTask(taskId, true);
-//     }
-
-// }
